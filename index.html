@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的个人介绍</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #eaf5ff;
+      color: #203a33;
+      font-family: system-ui, "Microsoft YaHei", sans-serif;
+      line-height: 1.7;
+    }
+    main {
+      width: min(100%, 560px);
+      padding: clamp(24px, 6vw, 48px);
+      background: white;
+      border: 1px solid #d4e4de;
+      border-radius: 20px;
+      box-shadow: 0 12px 32px #203a3310;
+    }
+    h1 { margin: 0 0 12px; line-height: 1.2; }
+    h2 { margin: 24px 0 8px; font-size: 1.2rem; }
+    p { margin: 0 0 16px; }
+    button {
+      margin-top: 8px;
+      padding: 10px 20px;
+      border: 0;
+      border-radius: 8px;
+      background: #256450;
+      color: white;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover { background: #194b3b; }
+    button:focus-visible { outline: 3px solid #256450; outline-offset: 4px; }
+    #message { margin: 12px 0 0; }
+    #message:empty { margin: 0; }
+    #todo-form, .todo-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #todo-form, .todo-item { flex-wrap: wrap; }
+    #todo-form { margin-top: 4px; }
+    #todo-input {
+      flex: 1 1 160px;
+      min-width: 0;
+      padding: 9px 12px;
+      border: 1px solid #839f96;
+      border-radius: 8px;
+      font: inherit;
+    }
+    #todo-form button, .todo-item button { margin: 0; }
+    #todo-list { list-style: none; padding: 0; margin: 12px 0 0; }
+    #todo-search, .todo-note textarea {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #839f96;
+      border-radius: 8px;
+      background: white;
+      color: inherit;
+      font: inherit;
+    }
+    #todo-search-result { margin: 8px 0 0; }
+    .todo-item[hidden] { display: none; }
+    .todo-note { width: 100%; min-width: 0; }
+    .todo-note label { display: block; }
+    .todo-note textarea { display: block; margin: 4px 0; resize: vertical; }
+    .todo-item { border-bottom: 1px solid #d4e4de; padding: 8px 0; }
+    .todo-item label {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .todo-item input { accent-color: #256450; }
+    .todo-item input:checked + span { text-decoration: line-through; }
+    .todo-item button {
+      padding: 4px 10px;
+      background: #edf5f2;
+      color: #203a33;
+    }
+    .todo-item button:hover { background: #d4e4de; }
+    .todo-options {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+    .todo-options label { flex: none; display: inline-block; }
+    .todo-options input, .todo-options select, #todo-sort, #todo-category, #todo-category-filter {
+      padding: 4px;
+      border: 1px solid #839f96;
+      border-radius: 6px;
+      background: white;
+      color: inherit;
+      font: inherit;
+    }
+    .todo-item select[data-category] { border-color: transparent; font-weight: 600; }
+    select[data-category="work"] { background: #dbeafe; color: #1e40af; }
+    select[data-category="study"] { background: #ede9fe; color: #5b21b6; }
+    select[data-category="life"] { background: #dcfce7; color: #166534; }
+    select[data-category="uncategorized"] { background: #edf0f2; color: #374151; }
+    .todo-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    select[data-priority="high"] { background: #fce4e4; color: #8a2020; }
+    select[data-priority="medium"] { background: #fff0cb; color: #6e4900; }
+    select[data-priority="low"] { background: #e1efff; color: #194d80; }
+    .todo-overdue { color: #a32121; font-weight: 700; }
+    .todo-stats {
+      margin: 0 0 16px;
+      padding: 14px;
+      border: 1px solid #d4e4de;
+      border-radius: 12px;
+      background: #f5faff;
+    }
+    .todo-stats h3 { margin: 0 0 8px; font-size: 1rem; }
+    .todo-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(105px, 100%), 1fr));
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+    .todo-stats-grid > div { padding: 6px 8px; background: white; border-radius: 8px; }
+    .todo-stats-grid dd { margin: 0; }
+    .todo-totals dd { font-weight: 700; font-variant-numeric: tabular-nums; }
+    #stats-overdue { color: #a32121; }
+    #stats-progress {
+      display: block;
+      width: 100%;
+      height: 12px;
+      margin: 4px 0 12px;
+      accent-color: #256450;
+    }
+    #stats-categories { margin-bottom: 0; }
+    #todo-status { margin: 8px 0 0; }
+    #todo-status:empty { margin: 0; }
+    #todo-conflict {
+      position: fixed;
+      z-index: 1;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(520px, calc(100% - 24px));
+    }
+    #todo-conflict:not(:empty) {
+      padding: 12px 16px;
+      border: 1px solid #a32121;
+      border-radius: 8px;
+      background: #fff1f1;
+      color: #8a2020;
+      font-weight: 700;
+    }
+    .todo-backup { display: flex; flex-wrap: wrap; gap: 8px; }
+    #backup-message { margin: 8px 0 0; }
+    #backup-message:empty { margin: 0; }
+    #backup-confirm {
+      max-width: min(420px, calc(100% - 32px));
+      padding: 24px;
+      border: 1px solid #d4e4de;
+      border-radius: 12px;
+      color: inherit;
+    }
+    #backup-confirm::backdrop { background: #203a3366; }
+    #backup-confirm h2 { margin-top: 0; }
+    footer {
+      margin-top: 24px;
+      padding-top: 12px;
+      border-top: 1px solid #d4e4de;
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>我的个人介绍</h1>
+    <p>欢迎来到我的第一个 Codex 网页!</p>
+    <h2>关于我</h2>
+    <p>我叫小林，正在学习制作网页。平时我喜欢阅读、散步，也喜欢用照片记录生活。</p>
+    <section>
+      <h2>兴趣爱好</h2>
+      <ul>
+        <li>阅读</li>
+        <li>散步</li>
+        <li>用照片记录生活</li>
+      </ul>
+    </section>
+    <button id="greet" type="button">点击我看看</button>
+    <p id="message" role="status"></p>
+    <section aria-labelledby="todo-heading">
+      <h2 id="todo-heading">我的待办事项</h2>
+      <section class="todo-stats" aria-labelledby="stats-heading">
+        <h3 id="stats-heading">任务进度统计</h3>
+        <dl class="todo-stats-grid todo-totals">
+          <div><dt>任务总数</dt><dd id="stats-total">0</dd></div>
+          <div><dt>已完成</dt><dd id="stats-completed">0</dd></div>
+          <div><dt>未完成</dt><dd id="stats-pending">0</dd></div>
+          <div><dt>已逾期</dt><dd id="stats-overdue">0</dd></div>
+        </dl>
+        <label for="stats-progress">完成率 <span id="stats-rate">0%</span></label>
+        <progress id="stats-progress" max="100" value="0"></progress>
+        <h3>各分类完成情况</h3>
+        <dl id="stats-categories" class="todo-stats-grid"></dl>
+      </section>
+      <label for="todo-input">待办事项</label>
+      <form id="todo-form">
+        <input id="todo-input" type="text" placeholder="例如：读十页书" required>
+        <select id="todo-category" aria-label="新事项分类">
+          <option value="uncategorized">未分类</option>
+          <option value="work">工作</option>
+          <option value="study">学习</option>
+          <option value="life">生活</option>
+        </select>
+        <button type="submit">添加</button>
+      </form>
+      <label for="todo-sort">排序方式</label>
+      <select id="todo-sort">
+        <option value="added">添加顺序</option>
+        <option value="date">截止日期（从早到晚）</option>
+        <option value="priority">优先级（从高到低）</option>
+      </select>
+      <div class="todo-backup">
+        <button id="backup-export" type="button">导出备份</button>
+        <button id="backup-import" type="button">导入备份</button>
+        <input id="backup-file" type="file" accept=".json,application/json" hidden>
+      </div>
+      <p id="backup-message" role="status"></p>
+      <dialog id="backup-confirm" aria-labelledby="backup-heading" aria-describedby="backup-summary">
+        <h2 id="backup-heading">确认覆盖待办事项</h2>
+        <p id="backup-summary"></p>
+        <form method="dialog">
+          <button value="cancel" autofocus>取消</button>
+          <button value="replace">确认覆盖</button>
+        </form>
+      </dialog>
+      <p id="todo-status" role="status"></p>
+      <p id="todo-conflict" role="alert"></p>
+      <div class="todo-filters">
+        <label for="todo-category-filter">分类筛选</label>
+        <select id="todo-category-filter">
+          <option value="all">全部分类</option>
+          <option value="work">工作</option>
+          <option value="study">学习</option>
+          <option value="life">生活</option>
+          <option value="uncategorized">未分类</option>
+        </select>
+        <label for="todo-search">搜索待办事项</label>
+        <input id="todo-search" type="search" placeholder="输入标题或备注关键词">
+      </div>
+      <p id="todo-search-result" role="status" hidden>没有找到匹配的待办事项。</p>
+      <ul id="todo-list"></ul>
+    </section>
+    <footer>当前时间：<time id="clock"></time></footer>
+  </main>
+  <script>
+    const button = document.querySelector("#greet");
+    const message = document.querySelector("#message");
+
+    button.addEventListener("click", () => {
+      message.textContent = "很高兴认识你，祝你今天愉快！";
+    });
+
+    const clock = document.querySelector("#clock");
+    const timeFormat = new Intl.DateTimeFormat("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    });
+
+    function updateClock() {
+      clock.textContent = timeFormat.format(new Date());
+      clock.dateTime = clock.textContent;
+    }
+
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    const todoForm = document.querySelector("#todo-form");
+    const todoInput = document.querySelector("#todo-input");
+    const todoList = document.querySelector("#todo-list");
+    const todoSearch = document.querySelector("#todo-search");
+    const todoCategory = document.querySelector("#todo-category");
+    const categoryFilter = document.querySelector("#todo-category-filter");
+    const todoSearchResult = document.querySelector("#todo-search-result");
+    const noteDrafts = new WeakMap();
+    const todoStatus = document.querySelector("#todo-status");
+    const todoConflict = document.querySelector("#todo-conflict");
+    const todoSort = document.querySelector("#todo-sort");
+    const storageKey = "my-first-codex-todos";
+    const sortKey = "my-first-codex-todo-sort";
+    const priorities = { high: "高", medium: "中", low: "低" };
+    const priorityOrder = ["high", "medium", "low"];
+    const categories = { work: "工作", study: "学习", life: "生活", uncategorized: "未分类" };
+    let todos = [];
+    let savedSnapshot;
+
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const savedTodos = JSON.parse(raw ?? "[]");
+      if (!Array.isArray(savedTodos) || !savedTodos.every((todo) =>
+        todo && typeof todo.text === "string" && todo.text.trim() &&
+        typeof todo.done === "boolean" &&
+        (!Object.hasOwn(todo, "date") || isBackupDate(todo.date)) &&
+        (!Object.hasOwn(todo, "priority") || priorityOrder.includes(todo.priority)) &&
+        (!Object.hasOwn(todo, "note") || typeof todo.note === "string") &&
+        (!Object.hasOwn(todo, "category") ||
+          (typeof todo.category === "string" && Object.hasOwn(categories, todo.category)))
+      )) throw new Error("Invalid todo data");
+      todos = savedTodos.map((todo) => ({
+          ...todo,
+          date: todo.date ?? "",
+          priority: todo.priority ?? "medium",
+          note: todo.note ?? "",
+          category: todo.category ?? "uncategorized"
+      }));
+      savedSnapshot = raw;
+    } catch {
+      todoStatus.textContent = "无法读取已保存的待办事项或数据格式异常。已暂停写入，原始数据已保留。";
+    }
+
+    try {
+      const savedSort = localStorage.getItem(sortKey);
+      if (["added", "date", "priority"].includes(savedSort)) todoSort.value = savedSort;
+    } catch {
+      // 排序偏好无法读取时，继续使用默认顺序。
+    }
+
+    async function saveTodos(propose, apply, expectedSnapshot) {
+      if (savedSnapshot === undefined) return false;
+      if (!navigator.locks) {
+        todoStatus.textContent = "当前浏览器无法安全协调多窗口写入，已暂停保存待办事项。";
+        return false;
+      }
+      try {
+        return await navigator.locks.request(storageKey, () => {
+          if (localStorage.getItem(storageKey) !== savedSnapshot ||
+              (expectedSnapshot !== undefined && expectedSnapshot !== savedSnapshot)) {
+            todoConflict.textContent = "检测到其他窗口已更新，请刷新后再操作。本次修改未保存，刷新前可先复制未保存的文字。";
+            return false;
+          }
+          const next = propose();
+          if (!next) return false;
+          const serialized = JSON.stringify(next);
+          localStorage.setItem(storageKey, serialized);
+          savedSnapshot = serialized;
+          apply(next);
+          todoStatus.textContent = "";
+          todoConflict.textContent = "";
+          return true;
+        });
+      } catch {
+        todoStatus.textContent = "浏览器无法保存待办事项，请重试。";
+        return false;
+      }
+    }
+
+    function saveTodo(todo, changes) {
+      return saveTodos(
+        () => todos.includes(todo) && todos.map((entry) => entry === todo ? { ...todo, ...changes } : entry),
+        () => Object.assign(todo, changes)
+      );
+    }
+
+    function compareDates(first, second) {
+      if (!first || !second) return Number(!first) - Number(!second);
+      const [firstYear, firstMonth, firstDay] = first.split("-").map(Number);
+      const [secondYear, secondMonth, secondDay] = second.split("-").map(Number);
+      return firstYear - secondYear || firstMonth - secondMonth || firstDay - secondDay;
+    }
+
+    function localDate() {
+      const now = new Date();
+      return [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0")
+      ].join("-");
+    }
+
+    function isOverdue(done, date, today) {
+      return !done && !!date && compareDates(date, today) < 0;
+    }
+
+    let lastStatsDate = "";
+    const percentFormat = new Intl.NumberFormat("zh-CN", {
+      style: "percent", maximumFractionDigits: 2
+    });
+
+    function updateStats(today = localDate()) {
+      lastStatsDate = today;
+      const byCategory = Object.fromEntries(
+        Object.keys(categories).map((category) => [category, { total: 0, completed: 0 }])
+      );
+      let completed = 0;
+      let overdue = 0;
+      for (const todo of todos) {
+        const stats = byCategory[todo.category];
+        stats.total++;
+        if (todo.done) {
+          completed++;
+          stats.completed++;
+        }
+        if (isOverdue(todo.done, todo.date, today)) overdue++;
+      }
+
+      const rate = todos.length ? completed / todos.length : 0;
+      document.querySelector("#stats-total").textContent = todos.length;
+      document.querySelector("#stats-completed").textContent = completed;
+      document.querySelector("#stats-pending").textContent = todos.length - completed;
+      document.querySelector("#stats-overdue").textContent = overdue;
+      document.querySelector("#stats-rate").textContent = percentFormat.format(rate);
+      document.querySelector("#stats-progress").value = rate * 100;
+
+      const categoryStats = document.querySelector("#stats-categories");
+      categoryStats.replaceChildren();
+      for (const [category, name] of Object.entries(categories)) {
+        const { completed, total } = byCategory[category];
+        const group = document.createElement("div");
+        const label = document.createElement("dt");
+        const count = document.createElement("dd");
+        label.textContent = name;
+        count.textContent = `已完成 ${completed} / ${total}`;
+        group.append(label, count);
+        categoryStats.append(group);
+      }
+
+      for (const item of todoList.children) {
+        const date = item.querySelector('input[type="date"]').value;
+        const done = item.querySelector('input[type="checkbox"]').checked;
+        item.querySelector(".todo-overdue").hidden = !isOverdue(done, date, today);
+      }
+    }
+
+    function filterTodos() {
+      const keyword = todoSearch.value.trim().toLowerCase();
+      const category = categoryFilter.value;
+      let hasMatch = false;
+      for (const item of todoList.children) {
+        const matchesText = item.dataset.title.toLowerCase().includes(keyword) ||
+          item.dataset.note.toLowerCase().includes(keyword);
+        const matchesCategory = category === "all" || item.dataset.category === category;
+        item.hidden = !matchesText || !matchesCategory;
+        if (!item.hidden) hasMatch = true;
+      }
+      todoSearchResult.hidden = hasMatch || (!keyword && category === "all");
+    }
+
+    function renderTodos() {
+      const ordered = [...todos];
+      if (todoSort.value === "date") {
+        ordered.sort((first, second) => compareDates(first.date, second.date));
+      } else if (todoSort.value === "priority") {
+        ordered.sort((first, second) =>
+          priorityOrder.indexOf(first.priority) - priorityOrder.indexOf(second.priority)
+        );
+      }
+
+      todoList.replaceChildren();
+      ordered.forEach(appendTodo);
+      filterTodos();
+      updateStats();
+    }
+
+    function appendTodo(todo) {
+      const item = document.createElement("li");
+      item.className = "todo-item";
+      item.dataset.title = todo.text;
+      item.dataset.note = todo.note;
+      item.dataset.category = todo.category;
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = todo.done;
+      const title = document.createElement("span");
+      title.textContent = todo.text;
+      label.append(checkbox, title);
+
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.textContent = "删除";
+      deleteButton.setAttribute("aria-label", "删除待办事项：" + todo.text);
+
+      const options = document.createElement("div");
+      options.className = "todo-options";
+      const dateLabel = document.createElement("label");
+      dateLabel.textContent = "截止日期 ";
+      const dateInput = document.createElement("input");
+      dateInput.type = "date";
+      dateInput.value = todo.date;
+      dateLabel.append(dateInput);
+
+      const priorityLabel = document.createElement("label");
+      priorityLabel.textContent = "优先级 ";
+      const prioritySelect = document.createElement("select");
+      for (const priority of priorityOrder) {
+        prioritySelect.add(new Option(priorities[priority], priority));
+      }
+      prioritySelect.value = todo.priority;
+      prioritySelect.dataset.priority = todo.priority;
+      priorityLabel.append(prioritySelect);
+
+      const overdue = document.createElement("span");
+      overdue.className = "todo-overdue";
+      overdue.textContent = "已逾期";
+      const categoryLabel = document.createElement("label");
+      categoryLabel.textContent = "分类 ";
+      const categorySelect = document.createElement("select");
+      for (const [value, name] of Object.entries(categories)) {
+        categorySelect.add(new Option(name, value));
+      }
+      categorySelect.value = todo.category;
+      categorySelect.dataset.category = todo.category;
+      categoryLabel.append(categorySelect);
+      options.append(dateLabel, priorityLabel, categoryLabel, overdue);
+
+      categorySelect.addEventListener("change", async () => {
+        await saveTodo(todo, { category: categorySelect.value });
+        categorySelect.value = todo.category;
+        categorySelect.dataset.category = todo.category;
+        item.dataset.category = todo.category;
+        updateStats();
+        filterTodos();
+        if (item.hidden) categoryFilter.focus();
+      });
+
+      dateInput.addEventListener("change", async () => {
+        await saveTodo(todo, { date: dateInput.value });
+        dateInput.value = todo.date;
+        if (todoSort.value === "date") renderTodos();
+        else updateStats();
+      });
+      prioritySelect.addEventListener("change", async () => {
+        await saveTodo(todo, { priority: prioritySelect.value });
+        prioritySelect.value = todo.priority;
+        prioritySelect.dataset.priority = todo.priority;
+        if (todoSort.value === "priority") renderTodos();
+      });
+      checkbox.addEventListener("change", async () => {
+        await saveTodo(todo, { done: checkbox.checked });
+        checkbox.checked = todo.done;
+        updateStats();
+      });
+      deleteButton.addEventListener("click", async () => {
+        if (!await saveTodos(
+          () => todos.includes(todo) && todos.filter((entry) => entry !== todo),
+          (next) => { todos = next; }
+        )) return;
+        renderTodos();
+        todoInput.focus();
+      });
+
+      const noteForm = document.createElement("form");
+      noteForm.className = "todo-note";
+      const noteLabel = document.createElement("label");
+      noteLabel.textContent = "备注";
+      const noteInput = document.createElement("textarea");
+      noteInput.rows = 2;
+      noteInput.value = noteDrafts.get(todo) ?? todo.note;
+      noteLabel.append(noteInput);
+
+      const saveNote = document.createElement("button");
+      saveNote.type = "submit";
+      saveNote.textContent = "保存备注";
+      const noteStatus = document.createElement("span");
+      noteStatus.setAttribute("role", "status");
+      noteForm.append(noteLabel, saveNote, " ", noteStatus);
+
+      noteInput.addEventListener("input", () => {
+        noteDrafts.set(todo, noteInput.value);
+        noteStatus.textContent = "";
+      });
+      noteForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        noteStatus.textContent = "";
+        const note = noteInput.value;
+        noteDrafts.set(todo, note);
+        if (!await saveTodo(todo, { note })) return;
+        item.dataset.note = todo.note;
+        if (noteDrafts.get(todo) === note) noteDrafts.delete(todo);
+        noteStatus.textContent = "备注已保存。";
+        filterTodos();
+        if (item.hidden) todoSearch.focus();
+      });
+
+      item.append(label, deleteButton, options, noteForm);
+      todoList.append(item);
+    }
+
+    todoInput.addEventListener("input", () => todoInput.setCustomValidity(""));
+    todoForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = todoInput.value.trim();
+      if (!text) {
+        todoInput.setCustomValidity("请输入待办事项。");
+        todoInput.reportValidity();
+        return;
+      }
+
+      const todo = {
+        text, done: false, date: "", priority: "medium", note: "", category: todoCategory.value
+      };
+      if (!await saveTodos(() => [...todos, todo], (next) => { todos = next; })) return;
+      renderTodos();
+      if (todoInput.value.trim() === text && todoCategory.value === todo.category) todoForm.reset();
+      todoInput.focus();
+    });
+
+    todoSort.addEventListener("change", () => {
+      renderTodos();
+      try {
+        localStorage.setItem(sortKey, todoSort.value);
+      } catch {
+        if (savedSnapshot !== undefined) todoStatus.textContent = "无法保存排序设置。";
+      }
+    });
+    todoSearch.addEventListener("input", filterTodos);
+    categoryFilter.addEventListener("change", filterTodos);
+
+    const backupFile = document.querySelector("#backup-file");
+    const backupMessage = document.querySelector("#backup-message");
+    const backupConfirm = document.querySelector("#backup-confirm");
+    const backupSummary = document.querySelector("#backup-summary");
+    let pendingBackup = null;
+    let backupSnapshot;
+
+    function isBackupDate(value) {
+      if (value === "") return true;
+      if (typeof value !== "string" || !/^\d{4,}-\d{2}-\d{2}$/.test(value)) return false;
+      const [year, month, day] = value.split("-").map(Number);
+      const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+      const daysPerMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      return Number.isSafeInteger(year) && year > 0 && month >= 1 && month <= 12 &&
+        day >= 1 && day <= daysPerMonth[month - 1];
+    }
+
+    document.querySelector("#backup-export").addEventListener("click", () => {
+      if (savedSnapshot === undefined) {
+        backupMessage.textContent = "无法读取待办事项，已停止导出，以免生成空备份。";
+        return;
+      }
+      const json = JSON.stringify({ version: 1, todos }, null, 2);
+      const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      const download = document.createElement("a");
+      download.href = url;
+      download.download = "待办事项备份.json";
+      document.body.append(download);
+      download.click();
+      download.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      backupMessage.textContent = "已发起备份下载，请查看浏览器的下载记录。";
+    });
+
+    document.querySelector("#backup-import").addEventListener("click", () => {
+      if (savedSnapshot === undefined) {
+        backupMessage.textContent = "当前数据读取异常，已暂停导入以保护原始数据。";
+        return;
+      }
+      backupFile.click();
+    });
+
+    backupFile.addEventListener("change", async () => {
+      const [file] = backupFile.files;
+      backupFile.value = "";
+      if (!file) return;
+
+      let backup;
+      try {
+        backup = JSON.parse(await file.text());
+      } catch {
+        backupMessage.textContent = "无法读取备份，请选择有效的 JSON 文件。";
+        return;
+      }
+
+      if (backup?.version !== 1 || !Array.isArray(backup.todos) ||
+          !backup.todos.every((todo) =>
+            todo && typeof todo.text === "string" && todo.text.trim() &&
+            typeof todo.done === "boolean" && isBackupDate(todo.date) &&
+            priorityOrder.includes(todo.priority) &&
+            (!Object.hasOwn(todo, "note") || typeof todo.note === "string") &&
+            (!Object.hasOwn(todo, "category") ||
+              (typeof todo.category === "string" && Object.hasOwn(categories, todo.category)))
+          )) {
+        backupMessage.textContent = "备份格式不正确，请选择本页面导出的 JSON 文件。";
+        return;
+      }
+
+      pendingBackup = backup.todos.map(
+        ({ text, done, date, priority, note = "", category = "uncategorized" }) => ({
+          text, done, date, priority, note, category
+        })
+      );
+      backupMessage.textContent = "";
+      backupSnapshot = savedSnapshot;
+      backupSummary.textContent =
+        `将用备份中的 ${pendingBackup.length} 条事项替换当前的 ${todos.length} 条事项。确定覆盖吗？`;
+      backupConfirm.returnValue = "";
+      backupConfirm.showModal();
+    });
+
+    backupConfirm.addEventListener("close", async () => {
+      const backup = pendingBackup;
+      pendingBackup = null;
+      if (backupConfirm.returnValue !== "replace" || !backup) {
+        backupMessage.textContent = "已取消导入。";
+        return;
+      }
+
+      if (!await saveTodos(() => backup, (next) => { todos = next; }, backupSnapshot)) {
+        backupMessage.textContent = "导入失败，浏览器无法保存备份。现有事项已保留。";
+        return;
+      }
+
+      renderTodos();
+      todoStatus.textContent = "";
+      backupMessage.textContent = `导入成功，已恢复 ${todos.length} 条事项。`;
+    });
+
+    renderTodos();
+    setInterval(() => {
+      const today = localDate();
+      if (today !== lastStatsDate) updateStats(today);
+    }, 1000);
+  </script>
+</body>
+</html>
