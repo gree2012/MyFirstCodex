@@ -114,6 +114,33 @@
     }
     .todo-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .todo-cycle { border-radius: 6px; padding: 2px 8px; background: #edf5f2; }
+    .calendar-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+    .calendar-controls button { margin: 0; padding: 6px 10px; }
+    .calendar-controls [aria-pressed="false"] { background: #edf5f2; color: #203a33; }
+    .calendar-controls h3 { margin: 0; }
+    #calendar-table { width: 100%; table-layout: fixed; border-spacing: 3px; }
+    #calendar-table th { font-weight: 600; }
+    #calendar-table td { vertical-align: top; background: #f2f6f4; border-radius: 6px; }
+    #calendar-table td[aria-hidden] { background: #f7f9f8; }
+    .calendar-day {
+      display: block; width: 100%; min-height: 96px; margin: 0; padding: 5px;
+      text-align: left; background: transparent; color: #203a33; overflow: hidden;
+    }
+    .calendar-day[aria-current="date"] { background: #dcefe5; box-shadow: inset 0 0 0 2px #256450; }
+    .calendar-day:hover { background: #e1efe9; }
+    .calendar-day span { display: block; }
+    .calendar-count, .calendar-preview { font-size: .78rem; }
+    .calendar-preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .calendar-completed { text-decoration: line-through; color: #4d6059; }
+    #calendar-detail { width: min(32rem, calc(100% - 2rem)); box-sizing: border-box; }
+    #calendar-detail-list { list-style: none; padding: 0; }
+    #calendar-detail-list button { overflow-wrap: anywhere; text-align: left; background: #edf5f2; color: #203a33; }
+    #calendar-detail-list button:hover { background: #dcefe5; }
+    @media (max-width: 600px) {
+      .calendar-day { min-height: 54px; padding: 2px; text-align: center; }
+      .calendar-preview { display: none !important; }
+      #calendar-table { border-spacing: 2px; }
+    }
     .todo-overdue { color: #a32121; font-weight: 700; }
     .todo-stats {
       margin: 0 0 16px;
@@ -287,7 +314,33 @@
         <input id="todo-search" type="search" placeholder="输入标题或备注关键词">
       </div>
       <p id="todo-search-result" role="status" hidden>没有找到匹配的待办事项。</p>
+      <div class="calendar-controls" role="group" aria-label="任务视图">
+        <button id="show-list" type="button" aria-pressed="true" aria-controls="todo-list">列表视图</button>
+        <button id="show-calendar" type="button" aria-pressed="false" aria-controls="todo-calendar">日历视图</button>
+      </div>
       <ul id="todo-list"></ul>
+      <section id="todo-calendar" aria-labelledby="calendar-month" hidden>
+        <div class="calendar-controls">
+          <h3 id="calendar-month" aria-live="polite"></h3>
+          <button id="calendar-prev" type="button">上个月</button>
+          <button id="calendar-today" type="button">今天</button>
+          <button id="calendar-next" type="button">下个月</button>
+        </div>
+        <table id="calendar-table" aria-labelledby="calendar-month">
+          <thead><tr>
+            <th scope="col">一</th><th scope="col">二</th><th scope="col">三</th>
+            <th scope="col">四</th><th scope="col">五</th><th scope="col">六</th><th scope="col">日</th>
+          </tr></thead>
+          <tbody id="calendar-days"></tbody>
+        </table>
+      </section>
+      <dialog id="calendar-detail" aria-labelledby="calendar-detail-title" closedby="closerequest">
+        <h2 id="calendar-detail-title"></h2>
+        <p id="calendar-detail-empty" hidden>当天没有符合当前筛选条件的任务。</p>
+        <ul id="calendar-detail-list"></ul>
+        <button id="calendar-add" type="button">在这一天新增任务</button>
+        <button id="calendar-close" type="button" autofocus>关闭</button>
+      </dialog>
     </section>
     <footer>当前时间：<time id="clock"></time></footer>
   </main>
@@ -334,6 +387,22 @@
     const todoStatus = document.querySelector("#todo-status");
     const todoConflict = document.querySelector("#todo-conflict");
     const todoSort = document.querySelector("#todo-sort");
+    const showList = document.querySelector("#show-list");
+    const showCalendar = document.querySelector("#show-calendar");
+    const calendar = document.querySelector("#todo-calendar");
+    const calendarMonth = document.querySelector("#calendar-month");
+    const calendarDays = document.querySelector("#calendar-days");
+    const calendarPrev = document.querySelector("#calendar-prev");
+    const calendarNext = document.querySelector("#calendar-next");
+    const calendarDetail = document.querySelector("#calendar-detail");
+    const calendarDetailTitle = document.querySelector("#calendar-detail-title");
+    const calendarDetailEmpty = document.querySelector("#calendar-detail-empty");
+    const calendarDetailList = document.querySelector("#calendar-detail-list");
+    const calendarClose = document.querySelector("#calendar-close");
+    const calendarTaskButtons = new WeakMap();
+    let [viewYear, viewMonth] = localDate().split("-").map(Number);
+    let selectedCalendarDate = "";
+    let editFromCalendar = false;
     const storageKey = "my-first-codex-todos";
     const sortKey = "my-first-codex-todo-sort";
     const sortOptions = ["added", "date", "priority"];
@@ -482,10 +551,16 @@
 
     function closeTodoEditor() {
       if (editSaving) return;
-      const button = editButtons.get(editingTodo);
+      const todo = editingTodo;
+      const button = editButtons.get(todo);
       editingTodo = null;
       initialEditValues = null;
       editDialog.close();
+      if (editFromCalendar) {
+        editFromCalendar = false;
+        openCalendarDay(selectedCalendarDate, todo);
+        return;
+      }
       if (button?.isConnected && !button.closest(".todo-item").hidden) button.focus();
       else if (categoryFilter.value !== "all") categoryFilter.focus();
       else if (statusFilter.value !== "all") statusFilter.focus();
@@ -745,24 +820,206 @@
       }
     }
 
-    function filterTodos() {
+    function currentTodoFilter() {
       const keyword = todoSearch.value.trim().toLowerCase();
       const category = categoryFilter.value;
       const status = statusFilter.value;
       const cycle = cycleFilter.value;
-      let hasMatch = false;
-      for (const item of todoList.children) {
-        const matchesText = item.dataset.title.toLowerCase().includes(keyword) ||
-          item.dataset.note.toLowerCase().includes(keyword);
-        const matchesCategory = category === "all" || item.dataset.category === category;
-        const done = item.querySelector('input[type="checkbox"]').checked;
-        const matchesStatus = status === "all" || done === (status === "done");
-        const matchesCycle = cycle === "all" || item.dataset.cycle === cycle;
-        item.hidden = !matchesText || !matchesCategory || !matchesStatus || !matchesCycle;
-        if (!item.hidden) hasMatch = true;
-      }
-      todoSearchResult.hidden = hasMatch || (!keyword && category === "all" && status === "all" && cycle === "all");
+      return { keyword, category, status, cycle };
     }
+
+    function matchesTodoFilter(todo, { keyword, category, status, cycle }) {
+      return (todo.text.toLowerCase().includes(keyword) || todo.note.toLowerCase().includes(keyword)) &&
+        (category === "all" || todo.category === category) &&
+        (status === "all" || todo.done === (status === "done")) &&
+        (cycle === "all" || taskCycle(todo) === cycle);
+    }
+
+    function filterTodos() {
+      const filter = currentTodoFilter();
+      const matches = [];
+      for (const todo of todos) {
+        const matchesFilter = matchesTodoFilter(todo, filter);
+        const item = editButtons.get(todo)?.closest(".todo-item");
+        if (item) item.hidden = !matchesFilter;
+        if (matchesFilter) matches.push(todo);
+      }
+      todoSearchResult.hidden = !calendar.hidden || matches.length > 0 ||
+        (!filter.keyword && filter.category === "all" && filter.status === "all" && filter.cycle === "all");
+      if (!calendar.hidden) renderCalendar(matches);
+    }
+
+    function calendarDate(year, month, day) {
+      return [String(year).padStart(4, "0"), String(month).padStart(2, "0"), String(day).padStart(2, "0")].join("-");
+    }
+
+    function calendarDateLabel(date) {
+      const [year, month, day] = date.split("-").map(Number);
+      return `${year}年${month}月${day}日`;
+    }
+
+    function agendaOrder(first, second) {
+      return Number(first.done) - Number(second.done) ||
+        priorityOrder.indexOf(first.priority) - priorityOrder.indexOf(second.priority);
+    }
+
+    function renderCalendar(matches) {
+      const focusedDate = calendarDays.contains(document.activeElement) ? document.activeElement.dataset.date : "";
+      const today = localDate();
+      const grouped = new Map();
+      for (const todo of matches) {
+        if (!todo.date) continue;
+        const [year, month, day] = todo.date.split("-").map(Number);
+        if (year !== viewYear || month !== viewMonth) continue;
+        if (!grouped.has(day)) grouped.set(day, []);
+        grouped.get(day).push(todo);
+      }
+      calendarMonth.textContent = `${viewYear}年${viewMonth}月`;
+      calendarPrev.disabled = viewYear === 1 && viewMonth === 1;
+      calendarNext.disabled = viewYear === Number.MAX_SAFE_INTEGER && viewMonth === 12;
+      calendarDays.replaceChildren();
+      const offset = (weekday([viewYear, viewMonth, 1]) + 6) % 7;
+      const days = daysInMonth(viewYear, viewMonth);
+      for (let index = 0; index < offset + days; index += 7) {
+        const row = document.createElement("tr");
+        for (let column = 0; column < 7; column++) {
+          const cell = document.createElement("td");
+          const day = index + column - offset + 1;
+          if (day < 1 || day > days) cell.setAttribute("aria-hidden", "true");
+          else {
+            const date = calendarDate(viewYear, viewMonth, day);
+            const tasks = (grouped.get(day) ?? []).sort(agendaOrder);
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "calendar-day";
+            button.dataset.date = date;
+            button.setAttribute("aria-label", `${calendarDateLabel(date)}，${tasks.length} 项任务`);
+            if (compareDates(date, today) === 0) button.setAttribute("aria-current", "date");
+            button.addEventListener("click", () => openCalendarDay(date));
+            const number = document.createElement("span");
+            number.textContent = day;
+            const count = document.createElement("span");
+            count.className = "calendar-count";
+            count.textContent = `${tasks.length} 项`;
+            button.append(number, count);
+            for (const task of tasks.slice(0, 2)) {
+              const preview = document.createElement("span");
+              preview.className = task.done ? "calendar-preview calendar-completed" : "calendar-preview";
+              preview.textContent = task.text;
+              button.append(preview);
+            }
+            if (tasks.length > 2) {
+              const more = document.createElement("span");
+              more.className = "calendar-preview";
+              more.textContent = `还有 ${tasks.length - 2} 项`;
+              button.append(more);
+            }
+            cell.append(button);
+          }
+          row.append(cell);
+        }
+        calendarDays.append(row);
+      }
+      if (focusedDate) calendarDays.querySelector(`[data-date="${focusedDate}"]`)?.focus();
+      if (calendarDetail.open) {
+        const focusedTodo = calendarTaskButtons.get(document.activeElement);
+        const focusButton = renderCalendarDetail(focusedTodo);
+        if (focusedTodo) (focusButton ?? calendarClose).focus();
+      }
+    }
+
+    function renderCalendarDetail(focusTodo) {
+      const filter = currentTodoFilter();
+      const tasks = todos.filter((todo) => todo.date && compareDates(todo.date, selectedCalendarDate) === 0 &&
+        matchesTodoFilter(todo, filter)).sort(agendaOrder);
+      calendarDetailTitle.textContent = calendarDateLabel(selectedCalendarDate);
+      calendarDetailEmpty.hidden = tasks.length > 0;
+      calendarDetailList.replaceChildren();
+      let focusButton;
+      for (const todo of tasks) {
+        const row = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = todo.text;
+        button.setAttribute("aria-label", "编辑待办事项：" + todo.text);
+        calendarTaskButtons.set(button, todo);
+        if (todo.done) button.classList.add("calendar-completed");
+        if (todo === focusTodo) focusButton = button;
+        button.addEventListener("click", () => {
+          calendarDetail.close();
+          editFromCalendar = true;
+          openTodoEditor(todo);
+        });
+        const info = document.createElement("div");
+        info.className = "todo-options";
+        info.textContent = [
+          todo.done ? "已完成" : "未完成", "优先级：" + priorities[todo.priority], categories[todo.category]
+        ].join(" · ");
+        if (taskCycle(todo) !== "none") {
+          const repeat = document.createElement("span");
+          repeat.className = "todo-cycle";
+          repeat.textContent = cycles[taskCycle(todo)];
+          info.append(repeat);
+        }
+        row.append(button, info);
+        calendarDetailList.append(row);
+      }
+      return focusButton;
+    }
+
+    function openCalendarDay(date, focusTodo) {
+      selectedCalendarDate = date;
+      const focusButton = renderCalendarDetail(focusTodo);
+      calendarDetail.showModal();
+      (focusButton ?? calendarClose).focus();
+    }
+
+    function closeCalendarDay() {
+      calendarDetail.close();
+      const day = calendarDays.querySelector(`[data-date="${selectedCalendarDate}"]`);
+      (day ?? showCalendar).focus();
+    }
+
+    function showTodoView(calendarVisible) {
+      calendar.hidden = !calendarVisible;
+      todoList.hidden = calendarVisible;
+      showList.setAttribute("aria-pressed", String(!calendarVisible));
+      showCalendar.setAttribute("aria-pressed", String(calendarVisible));
+      filterTodos();
+    }
+
+    function moveCalendarMonth(offset) {
+      viewMonth += offset;
+      if (viewMonth < 1) {
+        viewMonth = 12;
+        viewYear--;
+      } else if (viewMonth > 12) {
+        viewMonth = 1;
+        viewYear++;
+      }
+      filterTodos();
+    }
+
+    showList.addEventListener("click", () => showTodoView(false));
+    showCalendar.addEventListener("click", () => showTodoView(true));
+    calendarPrev.addEventListener("click", () => moveCalendarMonth(-1));
+    calendarNext.addEventListener("click", () => moveCalendarMonth(1));
+    document.querySelector("#calendar-today").addEventListener("click", () => {
+      [viewYear, viewMonth] = localDate().split("-").map(Number);
+      filterTodos();
+      calendarDays.querySelector('[aria-current="date"]')?.focus();
+    });
+    calendarClose.addEventListener("click", closeCalendarDay);
+    calendarDetail.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeCalendarDay();
+    });
+    document.querySelector("#calendar-add").addEventListener("click", () => {
+      closeCalendarDay();
+      todoDate.value = selectedCalendarDate;
+      todoDate.setCustomValidity("");
+      todoInput.focus();
+    });
 
     function renderTodos() {
       const ordered = [...todos];
@@ -783,10 +1040,7 @@
     function appendTodo(todo) {
       const item = document.createElement("li");
       item.className = "todo-item";
-      item.dataset.title = todo.text;
       item.dataset.date = todo.date;
-      item.dataset.note = todo.note;
-      item.dataset.category = todo.category;
       item.dataset.cycle = taskCycle(todo);
       const label = document.createElement("label");
       const checkbox = document.createElement("input");
@@ -1041,7 +1295,10 @@
     renderTodos();
     setInterval(() => {
       const today = localDate();
-      if (today !== lastStatsDate) updateStats(today);
+      if (today !== lastStatsDate) {
+        updateStats(today);
+        if (!calendar.hidden) filterTodos();
+      }
     }, 1000);
   </script>
 </body>
