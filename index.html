@@ -59,7 +59,7 @@
     }
     #todo-form button, .todo-item button { margin: 0; }
     #todo-list { list-style: none; padding: 0; margin: 12px 0 0; }
-    #todo-search, .todo-note textarea {
+    #todo-search, #todo-edit-form textarea {
       width: 100%;
       padding: 8px 12px;
       border: 1px solid #839f96;
@@ -70,9 +70,15 @@
     }
     #todo-search-result { margin: 8px 0 0; }
     .todo-item[hidden] { display: none; }
-    .todo-note { width: 100%; min-width: 0; }
-    .todo-note label { display: block; }
-    .todo-note textarea { display: block; margin: 4px 0; resize: vertical; }
+    .todo-note { width: 100%; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #todo-edit { width: min(28rem, calc(100% - 2rem)); box-sizing: border-box; }
+    #todo-edit-form label { display: grid; gap: 4px; margin: 8px 0; }
+    #todo-edit-form input, #todo-edit-form select, #todo-edit-form textarea {
+      box-sizing: border-box;
+      min-width: 0;
+      font: inherit;
+    }
+    #todo-edit-form textarea { resize: vertical; }
     .todo-item { border-bottom: 1px solid #d4e4de; padding: 8px 0; }
     .todo-item label {
       display: flex;
@@ -97,8 +103,7 @@
       gap: 8px;
       width: 100%;
     }
-    .todo-options label { flex: none; display: inline-block; }
-    .todo-options input, .todo-options select, #todo-sort, #todo-category,
+    #todo-sort, #todo-category,
     #todo-category-filter, #todo-status-filter {
       padding: 4px;
       border: 1px solid #839f96;
@@ -107,15 +112,7 @@
       color: inherit;
       font: inherit;
     }
-    .todo-item select[data-category] { border-color: transparent; font-weight: 600; }
-    select[data-category="work"] { background: #dbeafe; color: #1e40af; }
-    select[data-category="study"] { background: #ede9fe; color: #5b21b6; }
-    select[data-category="life"] { background: #dcfce7; color: #166534; }
-    select[data-category="uncategorized"] { background: #edf0f2; color: #374151; }
     .todo-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    select[data-priority="high"] { background: #fce4e4; color: #8a2020; }
-    select[data-priority="medium"] { background: #fff0cb; color: #6e4900; }
-    select[data-priority="low"] { background: #e1efff; color: #194d80; }
     .todo-overdue { color: #a32121; font-weight: 700; }
     .todo-stats {
       margin: 0 0 16px;
@@ -245,6 +242,22 @@
           <button value="replace">确认覆盖</button>
         </form>
       </dialog>
+      <dialog id="todo-edit" aria-labelledby="todo-edit-heading" closedby="closerequest">
+        <h2 id="todo-edit-heading">编辑任务</h2>
+        <form id="todo-edit-form">
+          <fieldset id="todo-edit-fields">
+            <legend>任务详情</legend>
+            <label>标题 <input name="text" type="text" required autofocus></label>
+            <label>截止日期 <input name="date" type="date"></label>
+            <label>优先级 <select name="priority"></select></label>
+            <label>备注 <textarea name="note" rows="4"></textarea></label>
+            <label>分类 <select name="category"></select></label>
+          </fieldset>
+          <p id="todo-edit-status" role="status"></p>
+          <button id="todo-edit-save" type="submit">保存</button>
+          <button id="todo-edit-cancel" type="button">取消</button>
+        </form>
+      </dialog>
       <p id="todo-status" role="status"></p>
       <p id="todo-conflict" role="alert"></p>
       <div class="todo-filters">
@@ -306,7 +319,7 @@
     const categoryFilter = document.querySelector("#todo-category-filter");
     const statusFilter = document.querySelector("#todo-status-filter");
     const todoSearchResult = document.querySelector("#todo-search-result");
-    const noteDrafts = new WeakMap();
+    const editButtons = new WeakMap();
     const todoStatus = document.querySelector("#todo-status");
     const todoConflict = document.querySelector("#todo-conflict");
     const todoSort = document.querySelector("#todo-sort");
@@ -350,10 +363,14 @@
       // 排序偏好无法读取时，继续使用默认顺序。
     }
 
-    async function saveTodos(propose, apply, restore) {
-      if (savedSnapshot === undefined) return false;
+    async function saveTodos(propose, apply, restore, reportFailure = () => {}) {
+      if (savedSnapshot === undefined) {
+        reportFailure("无法读取待办事项，已暂停保存。");
+        return false;
+      }
       if (!navigator.locks) {
         todoStatus.textContent = "当前浏览器无法安全协调多窗口写入，已暂停保存待办事项。";
+        reportFailure(todoStatus.textContent);
         return false;
       }
       try {
@@ -363,6 +380,7 @@
               (restore && restore.snapshot !== savedSnapshot) ||
               (restore?.sort !== undefined && oldSort !== restore.sortSnapshot)) {
             todoConflict.textContent = "检测到其他窗口已更新，请刷新后再操作。本次修改未保存，刷新前可先复制未保存的文字。";
+            reportFailure(todoConflict.textContent);
             return false;
           }
           const next = propose();
@@ -392,16 +410,123 @@
         });
       } catch {
         todoStatus.textContent = "浏览器无法保存待办事项，请重试。";
+        reportFailure(todoStatus.textContent);
         return false;
       }
     }
 
-    function saveTodo(todo, changes) {
+    function saveTodo(todo, changes, reportFailure) {
       return saveTodos(
         () => todos.includes(todo) && todos.map((entry) => entry === todo ? { ...todo, ...changes } : entry),
-        () => Object.assign(todo, changes)
+        () => Object.assign(todo, changes),
+        undefined,
+        reportFailure
       );
     }
+
+    const editDialog = document.querySelector("#todo-edit");
+    const editForm = document.querySelector("#todo-edit-form");
+    const editFields = document.querySelector("#todo-edit-fields");
+    const editStatus = document.querySelector("#todo-edit-status");
+    const editSave = document.querySelector("#todo-edit-save");
+    const editCancel = document.querySelector("#todo-edit-cancel");
+    const { text: editTitle, date: editDate, priority: editPriority, note: editNote, category: editCategory } =
+      editForm.elements;
+    let editingTodo = null;
+    let initialEditValues = null;
+    let editSaving = false;
+
+    for (const priority of priorityOrder) {
+      editPriority.add(new Option(priorities[priority], priority));
+    }
+    for (const [category, name] of Object.entries(categories)) {
+      editCategory.add(new Option(name, category));
+    }
+
+    function openTodoEditor(todo) {
+      editingTodo = todo;
+      editTitle.value = todo.text;
+      editDate.value = todo.date;
+      editPriority.value = todo.priority;
+      editNote.value = todo.note;
+      editCategory.value = todo.category;
+      initialEditValues = new FormData(editForm);
+      editTitle.setCustomValidity("");
+      editDate.setCustomValidity("");
+      editStatus.textContent = "";
+      editDialog.showModal();
+      editTitle.focus();
+    }
+
+    function closeTodoEditor() {
+      if (editSaving) return;
+      const button = editButtons.get(editingTodo);
+      editingTodo = null;
+      initialEditValues = null;
+      editDialog.close();
+      if (button?.isConnected && !button.closest(".todo-item").hidden) button.focus();
+      else if (categoryFilter.value !== "all") categoryFilter.focus();
+      else if (statusFilter.value !== "all") statusFilter.focus();
+      else todoSearch.focus();
+    }
+
+    editCancel.addEventListener("click", closeTodoEditor);
+    editDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeTodoEditor();
+    });
+    editTitle.addEventListener("input", () => editTitle.setCustomValidity(""));
+    editDate.addEventListener("input", () => editDate.setCustomValidity(""));
+    editForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!editDialog.open || editSaving || !editingTodo) return;
+
+      const text = editTitle.value.trim();
+      if (!text) {
+        editTitle.setCustomValidity("请输入任务标题。");
+        editTitle.reportValidity();
+        return;
+      }
+      if (!isBackupDate(editDate.value)) {
+        editDate.setCustomValidity("请输入有效的截止日期。");
+        editDate.reportValidity();
+        return;
+      }
+
+      const todo = editingTodo;
+      const changes = Object.fromEntries(
+        [...new FormData(editForm)].filter(([field, value]) => {
+          const original = initialEditValues.get(field);
+          if (field === "text") return text !== original.trim();
+          if (field === "date") return compareDates(value, original) !== 0;
+          return value !== original;
+        })
+      );
+      if (Object.keys(changes).length === 0) {
+        closeTodoEditor();
+        return;
+      }
+      if (Object.hasOwn(changes, "text")) changes.text = text;
+      editSaving = true;
+      editFields.disabled = editSave.disabled = editCancel.disabled = true;
+      editStatus.textContent = "正在保存…";
+      let failureMessage = "";
+      const saved = todos.includes(todo) && await saveTodo(todo, changes, (message) => {
+        failureMessage = message;
+      });
+      editSaving = false;
+      editFields.disabled = editSave.disabled = editCancel.disabled = false;
+
+      if (!saved) {
+        editStatus.textContent = todos.includes(todo)
+          ? failureMessage || "无法保存任务，请重试。"
+          : "此任务已删除或被替换，本次修改未保存。你可以复制输入后关闭弹窗。";
+        editTitle.focus();
+        return;
+      }
+      renderTodos();
+      closeTodoEditor();
+    });
 
     function compareDates(first, second) {
       if (!first || !second) return Number(!first) - Number(!second);
@@ -467,7 +592,7 @@
       }
 
       for (const item of todoList.children) {
-        const date = item.querySelector('input[type="date"]').value;
+        const date = item.dataset.date;
         const done = item.querySelector('input[type="checkbox"]').checked;
         item.querySelector(".todo-overdue").hidden = !isOverdue(done, date, today);
       }
@@ -510,6 +635,7 @@
       const item = document.createElement("li");
       item.className = "todo-item";
       item.dataset.title = todo.text;
+      item.dataset.date = todo.date;
       item.dataset.note = todo.note;
       item.dataset.category = todo.category;
       const label = document.createElement("label");
@@ -520,6 +646,13 @@
       title.textContent = todo.text;
       label.append(checkbox, title);
 
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.textContent = "编辑";
+      editButton.setAttribute("aria-label", "编辑待办事项：" + todo.text);
+      editButton.addEventListener("click", () => openTodoEditor(todo));
+      editButtons.set(todo, editButton);
+
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
       deleteButton.textContent = "删除";
@@ -527,59 +660,20 @@
 
       const options = document.createElement("div");
       options.className = "todo-options";
-      const dateLabel = document.createElement("label");
-      dateLabel.textContent = "截止日期 ";
-      const dateInput = document.createElement("input");
-      dateInput.type = "date";
-      dateInput.value = todo.date;
-      dateLabel.append(dateInput);
+      const date = document.createElement("span");
+      date.textContent = "截止日期：" + (todo.date || "无");
 
-      const priorityLabel = document.createElement("label");
-      priorityLabel.textContent = "优先级 ";
-      const prioritySelect = document.createElement("select");
-      for (const priority of priorityOrder) {
-        prioritySelect.add(new Option(priorities[priority], priority));
-      }
-      prioritySelect.value = todo.priority;
-      prioritySelect.dataset.priority = todo.priority;
-      priorityLabel.append(prioritySelect);
+      const priority = document.createElement("span");
+      priority.textContent = "优先级：" + priorities[todo.priority];
+
+      const category = document.createElement("span");
+      category.textContent = "分类：" + categories[todo.category];
 
       const overdue = document.createElement("span");
       overdue.className = "todo-overdue";
       overdue.textContent = "已逾期";
-      const categoryLabel = document.createElement("label");
-      categoryLabel.textContent = "分类 ";
-      const categorySelect = document.createElement("select");
-      for (const [value, name] of Object.entries(categories)) {
-        categorySelect.add(new Option(name, value));
-      }
-      categorySelect.value = todo.category;
-      categorySelect.dataset.category = todo.category;
-      categoryLabel.append(categorySelect);
-      options.append(dateLabel, priorityLabel, categoryLabel, overdue);
+      options.append(date, priority, category, overdue);
 
-      categorySelect.addEventListener("change", async () => {
-        await saveTodo(todo, { category: categorySelect.value });
-        categorySelect.value = todo.category;
-        categorySelect.dataset.category = todo.category;
-        item.dataset.category = todo.category;
-        updateStats();
-        filterTodos();
-        if (item.hidden) categoryFilter.focus();
-      });
-
-      dateInput.addEventListener("change", async () => {
-        await saveTodo(todo, { date: dateInput.value });
-        dateInput.value = todo.date;
-        if (todoSort.value === "date") renderTodos();
-        else updateStats();
-      });
-      prioritySelect.addEventListener("change", async () => {
-        await saveTodo(todo, { priority: prioritySelect.value });
-        prioritySelect.value = todo.priority;
-        prioritySelect.dataset.priority = todo.priority;
-        if (todoSort.value === "priority") renderTodos();
-      });
       checkbox.addEventListener("change", async () => {
         await saveTodo(todo, { done: checkbox.checked });
         checkbox.checked = todo.done;
@@ -596,40 +690,13 @@
         todoInput.focus();
       });
 
-      const noteForm = document.createElement("form");
-      noteForm.className = "todo-note";
-      const noteLabel = document.createElement("label");
-      noteLabel.textContent = "备注";
-      const noteInput = document.createElement("textarea");
-      noteInput.rows = 2;
-      noteInput.value = noteDrafts.get(todo) ?? todo.note;
-      noteLabel.append(noteInput);
-
-      const saveNote = document.createElement("button");
-      saveNote.type = "submit";
-      saveNote.textContent = "保存备注";
-      const noteStatus = document.createElement("span");
-      noteStatus.setAttribute("role", "status");
-      noteForm.append(noteLabel, saveNote, " ", noteStatus);
-
-      noteInput.addEventListener("input", () => {
-        noteDrafts.set(todo, noteInput.value);
-        noteStatus.textContent = "";
-      });
-      noteForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        noteStatus.textContent = "";
-        const note = noteInput.value;
-        noteDrafts.set(todo, note);
-        if (!await saveTodo(todo, { note })) return;
-        item.dataset.note = todo.note;
-        if (noteDrafts.get(todo) === note) noteDrafts.delete(todo);
-        noteStatus.textContent = "备注已保存。";
-        filterTodos();
-        if (item.hidden) todoSearch.focus();
-      });
-
-      item.append(label, deleteButton, options, noteForm);
+      item.append(label, editButton, deleteButton, options);
+      if (todo.note) {
+        const note = document.createElement("p");
+        note.className = "todo-note";
+        note.textContent = "备注：" + todo.note;
+        item.append(note);
+      }
       todoList.append(item);
     }
 
