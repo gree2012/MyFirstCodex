@@ -304,6 +304,7 @@
     const todoSort = document.querySelector("#todo-sort");
     const storageKey = "my-first-codex-todos";
     const sortKey = "my-first-codex-todo-sort";
+    const sortOptions = ["added", "date", "priority"];
     const priorities = { high: "高", medium: "中", low: "低" };
     const priorityOrder = ["high", "medium", "low"];
     const categories = { work: "工作", study: "学习", life: "生活", uncategorized: "未分类" };
@@ -336,12 +337,12 @@
 
     try {
       const savedSort = localStorage.getItem(sortKey);
-      if (["added", "date", "priority"].includes(savedSort)) todoSort.value = savedSort;
+      if (sortOptions.includes(savedSort)) todoSort.value = savedSort;
     } catch {
       // 排序偏好无法读取时，继续使用默认顺序。
     }
 
-    async function saveTodos(propose, apply, expectedSnapshot) {
+    async function saveTodos(propose, apply, restore) {
       if (savedSnapshot === undefined) return false;
       if (!navigator.locks) {
         todoStatus.textContent = "当前浏览器无法安全协调多窗口写入，已暂停保存待办事项。";
@@ -349,15 +350,32 @@
       }
       try {
         return await navigator.locks.request(storageKey, () => {
+          const oldSort = restore?.sort !== undefined ? localStorage.getItem(sortKey) : null;
           if (localStorage.getItem(storageKey) !== savedSnapshot ||
-              (expectedSnapshot !== undefined && expectedSnapshot !== savedSnapshot)) {
+              (restore && restore.snapshot !== savedSnapshot) ||
+              (restore?.sort !== undefined && oldSort !== restore.sortSnapshot)) {
             todoConflict.textContent = "检测到其他窗口已更新，请刷新后再操作。本次修改未保存，刷新前可先复制未保存的文字。";
             return false;
           }
           const next = propose();
           if (!next) return false;
           const serialized = JSON.stringify(next);
-          localStorage.setItem(storageKey, serialized);
+          const changeSort = restore?.sort !== undefined && restore.sort !== oldSort;
+          if (changeSort) localStorage.setItem(sortKey, restore.sort);
+          try {
+            localStorage.setItem(storageKey, serialized);
+          } catch (error) {
+            if (changeSort) {
+              try {
+                if (oldSort === null) localStorage.removeItem(sortKey);
+                else localStorage.setItem(sortKey, oldSort);
+              } catch {
+                todoStatus.textContent = "原有待办事项已保留，但排序设置可能已改变，请刷新后检查。";
+                return false;
+              }
+            }
+            throw error;
+          }
           savedSnapshot = serialized;
           apply(next);
           todoStatus.textContent = "";
@@ -621,10 +639,13 @@
       todoInput.focus();
     });
 
-    todoSort.addEventListener("change", () => {
+    todoSort.addEventListener("change", async () => {
+      const sort = todoSort.value;
       renderTodos();
       try {
-        localStorage.setItem(sortKey, todoSort.value);
+        const saveSort = () => localStorage.setItem(sortKey, sort);
+        if (navigator.locks) await navigator.locks.request(storageKey, saveSort);
+        else saveSort();
       } catch {
         if (savedSnapshot !== undefined) todoStatus.textContent = "无法保存排序设置。";
       }
@@ -637,7 +658,6 @@
     const backupConfirm = document.querySelector("#backup-confirm");
     const backupSummary = document.querySelector("#backup-summary");
     let pendingBackup = null;
-    let backupSnapshot;
 
     function isBackupDate(value) {
       if (value === "") return true;
@@ -654,7 +674,7 @@
         backupMessage.textContent = "无法读取待办事项，已停止导出，以免生成空备份。";
         return;
       }
-      const json = JSON.stringify({ version: 1, todos }, null, 2);
+      const json = JSON.stringify({ version: 2, todos, sort: todoSort.value }, null, 2);
       const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
       const download = document.createElement("a");
       download.href = url;
@@ -687,7 +707,10 @@
         return;
       }
 
-      if (backup?.version !== 1 || !Array.isArray(backup.todos) ||
+      if ((backup?.version !== 1 && backup?.version !== 2) ||
+          ((backup.version === 2 || Object.hasOwn(backup, "sort")) &&
+            !sortOptions.includes(backup.sort)) ||
+          !Array.isArray(backup.todos) ||
           !backup.todos.every((todo) =>
             todo && typeof todo.text === "string" && todo.text.trim() &&
             typeof todo.done === "boolean" && isBackupDate(todo.date) &&
@@ -700,15 +723,25 @@
         return;
       }
 
-      pendingBackup = backup.todos.map(
-        ({ text, done, date, priority, note = "", category = "uncategorized" }) => ({
-          text, done, date, priority, note, category
-        })
-      );
+      let sortSnapshot;
+      try {
+        if (backup.sort !== undefined) sortSnapshot = localStorage.getItem(sortKey);
+      } catch {
+        backupMessage.textContent = "无法读取当前排序设置，已停止导入。";
+        return;
+      }
+      pendingBackup = {
+        todos: backup.todos.map((todo) => ({
+          ...todo, note: todo.note ?? "", category: todo.category ?? "uncategorized"
+        })),
+        sort: backup.sort,
+        sortSnapshot,
+        snapshot: savedSnapshot
+      };
       backupMessage.textContent = "";
-      backupSnapshot = savedSnapshot;
+      const sortNotice = backup.sort === undefined ? "当前排序方式会保留。" : "排序方式也会恢复为备份中的设置。";
       backupSummary.textContent =
-        `将用备份中的 ${pendingBackup.length} 条事项替换当前的 ${todos.length} 条事项。确定覆盖吗？`;
+        `将用备份中的 ${pendingBackup.todos.length} 条事项替换当前的 ${todos.length} 条事项。${sortNotice}确定覆盖吗？`;
       backupConfirm.returnValue = "";
       backupConfirm.showModal();
     });
@@ -721,8 +754,11 @@
         return;
       }
 
-      if (!await saveTodos(() => backup, (next) => { todos = next; }, backupSnapshot)) {
-        backupMessage.textContent = "导入失败，浏览器无法保存备份。现有事项已保留。";
+      if (!await saveTodos(() => backup.todos, (next) => {
+        todos = next;
+        if (backup.sort !== undefined) todoSort.value = backup.sort;
+      }, backup)) {
+        backupMessage.textContent = "导入失败，现有事项已保留。";
         return;
       }
 
