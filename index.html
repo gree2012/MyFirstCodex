@@ -186,6 +186,7 @@
     <p>欢迎来到我的第一个 Codex 网页！今天我学会了 Git 版本管理！</p>
     <h2>关于我</h2>
     <p>我叫小林，正在学习制作网页。平时我喜欢阅读、散步，也喜欢用照片记录生活。</p>
+    <p>今天的日期：<span id="today-date"></span></p>
     <section>
       <h2>兴趣爱好</h2>
       <ul>
@@ -262,6 +263,10 @@
     <footer>当前时间：<time id="clock"></time></footer>
   </main>
   <script>
+    const today = new Date();
+    document.querySelector("#today-date").textContent =
+      `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+
     const button = document.querySelector("#greet");
     const message = document.querySelector("#message");
 
