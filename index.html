@@ -136,6 +136,23 @@
     #calendar-detail-list { list-style: none; padding: 0; }
     #calendar-detail-list button { overflow-wrap: anywhere; text-align: left; background: #edf5f2; color: #203a33; }
     #calendar-detail-list button:hover { background: #dcefe5; }
+    .statistics-cards, .statistics-distributions {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 155px), 1fr)); gap: 12px;
+    }
+    .statistics-cards div, .statistics-panel {
+      min-width: 0; padding: 12px; border: 1px solid #d4e4de; border-radius: 12px; background: #f5faff;
+    }
+    .statistics-cards dd { margin: 4px 0 0; font-size: 1.35rem; font-weight: 700; }
+    .statistics-panel { margin: 12px 0; }
+    .statistics-panel h3 { margin: 0 0 8px; }
+    #statistics-period { font: inherit; max-width: 100%; }
+    #statistics-chart { display: block; width: 100%; height: 145px; margin-top: 12px; }
+    .statistics-axis { display: flex; justify-content: space-between; gap: 2px; font-size: .75rem; }
+    .statistics-axis span { min-width: 0; overflow-wrap: anywhere; text-align: center; }
+    .statistics-table { width: 100%; text-align: left; }
+    .statistics-distributions dt { margin-top: 6px; }
+    .statistics-distributions dd { margin: 0; display: flex; align-items: center; gap: 8px; }
+    .statistics-distributions progress { width: 75%; accent-color: #256450; }
     @media (max-width: 600px) {
       .calendar-day { min-height: 54px; padding: 2px; text-align: center; }
       .calendar-preview { display: none !important; }
@@ -317,6 +334,7 @@
       <div class="calendar-controls" role="group" aria-label="任务视图">
         <button id="show-list" type="button" aria-pressed="true" aria-controls="todo-list">列表视图</button>
         <button id="show-calendar" type="button" aria-pressed="false" aria-controls="todo-calendar">日历视图</button>
+        <button id="show-statistics" type="button" aria-pressed="false" aria-controls="todo-statistics">统计视图</button>
       </div>
       <ul id="todo-list"></ul>
       <section id="todo-calendar" aria-labelledby="calendar-month" hidden>
@@ -333,6 +351,42 @@
           </tr></thead>
           <tbody id="calendar-days"></tbody>
         </table>
+      </section>
+      <section id="todo-statistics" aria-labelledby="statistics-heading" hidden>
+        <h2 id="statistics-heading">筛选后的任务统计</h2>
+        <p id="statistics-empty" role="status" hidden>当前筛选条件下没有任务可统计。</p>
+        <dl class="statistics-cards">
+          <div><dt>任务总数</dt><dd id="statistics-total">0</dd></div>
+          <div><dt>已完成</dt><dd id="statistics-done">0</dd></div>
+          <div><dt>未完成</dt><dd id="statistics-pending">0</dd></div>
+          <div><dt>完成率</dt><dd id="statistics-rate">0%</dd></div>
+        </dl>
+        <div class="statistics-panel">
+          <h3>完成趋势</h3>
+          <label for="statistics-period">统计周期</label>
+          <select id="statistics-period">
+            <option value="7">最近 7 天</option>
+            <option value="30">最近 30 天</option>
+            <option value="6">最近 6 个月</option>
+          </select>
+          <p id="statistics-unknown" hidden></p>
+          <p id="statistics-trend-message" role="status" hidden></p>
+          <div id="statistics-scale" aria-hidden="true"></div>
+          <svg id="statistics-chart" viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div id="statistics-axis" class="statistics-axis" aria-hidden="true"></div>
+          <details>
+            <summary>查看完成趋势数据</summary>
+            <table class="statistics-table">
+              <caption>按实际完成时间统计</caption>
+              <thead><tr><th scope="col">日期</th><th scope="col">已完成数量</th></tr></thead>
+              <tbody id="statistics-trend-data"></tbody>
+            </table>
+          </details>
+        </div>
+        <div class="statistics-distributions">
+          <section class="statistics-panel"><h3>分类分布</h3><dl id="statistics-categories"></dl></section>
+          <section class="statistics-panel"><h3>优先级分布</h3><dl id="statistics-priorities"></dl></section>
+        </div>
       </section>
       <dialog id="calendar-detail" aria-labelledby="calendar-detail-title" closedby="closerequest">
         <h2 id="calendar-detail-title"></h2>
@@ -389,6 +443,9 @@
     const todoSort = document.querySelector("#todo-sort");
     const showList = document.querySelector("#show-list");
     const showCalendar = document.querySelector("#show-calendar");
+    const showStatistics = document.querySelector("#show-statistics");
+    const statistics = document.querySelector("#todo-statistics");
+    const statisticsPeriod = document.querySelector("#statistics-period");
     const calendar = document.querySelector("#todo-calendar");
     const calendarMonth = document.querySelector("#calendar-month");
     const calendarDays = document.querySelector("#calendar-days");
@@ -418,7 +475,7 @@
       const savedTodos = JSON.parse(raw ?? "[]");
       if (!Array.isArray(savedTodos) || !savedTodos.every((todo) =>
         todo && typeof todo.text === "string" && todo.text.trim() &&
-        typeof todo.done === "boolean" &&
+        typeof todo.done === "boolean" && validCompletion(todo) &&
         (!Object.hasOwn(todo, "date") || isBackupDate(todo.date)) &&
         (!Object.hasOwn(todo, "priority") || priorityOrder.includes(todo.priority)) &&
         (!Object.hasOwn(todo, "note") || typeof todo.note === "string") &&
@@ -637,13 +694,19 @@
       return firstYear - secondYear || firstMonth - secondMonth || firstDay - secondDay;
     }
 
-    function localDate() {
-      const now = new Date();
+    function localDate(now = new Date()) {
       return [
         now.getFullYear(),
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0")
       ].join("-");
+    }
+
+    function validCompletion(todo) {
+      if (!Object.hasOwn(todo, "completedAt")) return true;
+      if (!todo.done || typeof todo.completedAt !== "string") return false;
+      const date = new Date(todo.completedAt);
+      return Number.isFinite(date.getTime()) && date.toISOString() === todo.completedAt;
     }
 
     function taskCycle(todo) {
@@ -739,11 +802,15 @@
     }
 
     async function setTodoDone(todo, done) {
-      const completedOn = localDate();
+      const now = new Date();
+      const completedOn = localDate(now);
+      const completedAt = done ? now.toISOString() : undefined;
       let successor;
       const saved = await saveTodos(() => {
         if (!todos.includes(todo) || todo.done === done) return false;
         const updated = { ...todo, done };
+        if (done) updated.completedAt = completedAt;
+        else delete updated.completedAt;
         const next = todos.map((entry) => entry === todo ? updated : entry);
         if (done && taskCycle(todo) !== "none" && !todo.successorGenerated) {
           successor = {
@@ -758,6 +825,8 @@
         return next;
       }, () => {
         todo.done = done;
+        if (done) todo.completedAt = completedAt;
+        else delete todo.completedAt;
         if (successor) {
           todo.successorGenerated = true;
           todos.push(successor);
@@ -844,13 +913,144 @@
         if (item) item.hidden = !matchesFilter;
         if (matchesFilter) matches.push(todo);
       }
-      todoSearchResult.hidden = !calendar.hidden || matches.length > 0 ||
+      todoSearchResult.hidden = todoList.hidden || matches.length > 0 ||
         (!filter.keyword && filter.category === "all" && filter.status === "all" && filter.cycle === "all");
       if (!calendar.hidden) renderCalendar(matches);
+      if (!statistics.hidden) renderStatistics(matches);
     }
 
     function calendarDate(year, month, day) {
       return [String(year).padStart(4, "0"), String(month).padStart(2, "0"), String(day).padStart(2, "0")].join("-");
+    }
+
+    function completionBuckets(period, today = localDate()) {
+      const monthly = period === "6";
+      const buckets = new Map();
+      let [year, month, day] = today.split("-").map(Number);
+      const dates = [];
+      for (let index = 0; index < Number(period); index++) {
+        const date = calendarDate(year, month, monthly ? 1 : day);
+        dates.push(monthly ? date.slice(0, -3) : date);
+        if (monthly || --day === 0) {
+          if (--month === 0) {
+            year--;
+            month = 12;
+          }
+          day = daysInMonth(year, month);
+        }
+      }
+      for (const date of dates.reverse()) buckets.set(date, 0);
+      return buckets;
+    }
+
+    function renderCompletionChart(buckets, lineChart) {
+      const chart = document.querySelector("#statistics-chart");
+      const axis = document.querySelector("#statistics-axis");
+      const table = document.querySelector("#statistics-trend-data");
+      chart.replaceChildren();
+      axis.replaceChildren();
+      table.replaceChildren();
+      const max = Math.max(1, ...buckets.values());
+      document.querySelector("#statistics-scale").textContent = `刻度：0–${max} 项`;
+      const width = 300 / buckets.size;
+      const baseline = 96;
+      const points = [];
+      const shape = (name, attributes) => {
+        const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+        for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+        chart.append(node);
+      };
+      shape("line", { x1: 0, x2: 300, y1: baseline, y2: baseline, stroke: "#839f96" });
+      let index = 0;
+      for (const [date, count] of buckets) {
+        const height = count / max * 88;
+        const x = (index + 0.5) * width;
+        const y = baseline - height;
+        if (lineChart) points.push([x, y]);
+        else shape("rect", { x: x - width * 0.3, y, width: width * 0.6, height, fill: "#256450" });
+
+        if (!lineChart || [0, 7, 14, 21, 29].includes(index)) {
+          const label = document.createElement("span");
+          label.textContent = date.length === 7 ? date : date.slice(-5);
+          axis.append(label);
+        }
+        const row = document.createElement("tr");
+        const label = document.createElement("th");
+        label.scope = "row";
+        label.textContent = date;
+        const value = document.createElement("td");
+        value.textContent = count;
+        row.append(label, value);
+        table.append(row);
+        index++;
+      }
+      if (lineChart) {
+        shape("polyline", {
+          points: points.map((point) => point.join(",")).join(" "), fill: "none", stroke: "#256450",
+          "stroke-width": 2, "vector-effect": "non-scaling-stroke"
+        });
+      }
+    }
+
+    function renderDistribution(id, labels, counts, total) {
+      const list = document.querySelector(id);
+      list.replaceChildren();
+      for (const [key, label] of Object.entries(labels)) {
+        const name = document.createElement("dt");
+        name.textContent = label;
+        const value = document.createElement("dd");
+        const bar = document.createElement("progress");
+        bar.max = Math.max(total, 1);
+        bar.value = counts[key];
+        bar.setAttribute("aria-hidden", "true");
+        value.append(bar, String(counts[key]));
+        list.append(name, value);
+      }
+    }
+
+    function renderStatistics(matches) {
+      const total = matches.length;
+      const categoryCounts = Object.fromEntries(Object.keys(categories).map((key) => [key, 0]));
+      const priorityCounts = Object.fromEntries(priorityOrder.map((key) => [key, 0]));
+      const period = statisticsPeriod.value;
+      const today = localDate();
+      const buckets = completionBuckets(period, today);
+      let completed = 0;
+      let unknown = 0;
+      let inPeriod = 0;
+      for (const todo of matches) {
+        categoryCounts[todo.category]++;
+        priorityCounts[todo.priority]++;
+        if (!todo.done) continue;
+        completed++;
+        if (!todo.completedAt) {
+          unknown++;
+          continue;
+        }
+        const date = localDate(new Date(todo.completedAt));
+        const key = period === "6" ? date.slice(0, -3) : date;
+        if (compareDates(date, today) <= 0 && buckets.has(key)) {
+          buckets.set(key, buckets.get(key) + 1);
+          inPeriod++;
+        }
+      }
+      document.querySelector("#statistics-total").textContent = total;
+      document.querySelector("#statistics-done").textContent = completed;
+      document.querySelector("#statistics-pending").textContent = total - completed;
+      document.querySelector("#statistics-rate").textContent = percentFormat.format(total ? completed / total : 0);
+      document.querySelector("#statistics-empty").hidden = total > 0;
+      const history = document.querySelector("#statistics-unknown");
+      history.hidden = unknown === 0;
+      history.textContent = unknown
+        ? `部分历史已完成任务缺少完成时间，因此趋势数据不包含这些记录（${unknown} 项）。` : "";
+      const status = document.querySelector("#statistics-trend-message");
+      status.textContent = !total ? "" : !completed ? "当前筛选结果中没有已完成的任务。"
+        : completed === unknown ? "当前筛选结果中没有可用于趋势的完成时间。"
+        : !inPeriod ? "所选周期内没有已记录完成时间的任务。" : "";
+      status.hidden = !status.textContent;
+      renderCompletionChart(buckets, period === "30");
+      renderDistribution("#statistics-categories", categories, categoryCounts, total);
+      renderDistribution("#statistics-priorities", priorities, priorityCounts, total);
     }
 
     function calendarDateLabel(date) {
@@ -980,11 +1180,13 @@
       (day ?? showCalendar).focus();
     }
 
-    function showTodoView(calendarVisible) {
-      calendar.hidden = !calendarVisible;
-      todoList.hidden = calendarVisible;
-      showList.setAttribute("aria-pressed", String(!calendarVisible));
-      showCalendar.setAttribute("aria-pressed", String(calendarVisible));
+    function showTodoView(view) {
+      for (const [name, button, panel] of [
+        ["list", showList, todoList], ["calendar", showCalendar, calendar], ["statistics", showStatistics, statistics]
+      ]) {
+        panel.hidden = view !== name;
+        button.setAttribute("aria-pressed", String(view === name));
+      }
       filterTodos();
     }
 
@@ -1000,8 +1202,10 @@
       filterTodos();
     }
 
-    showList.addEventListener("click", () => showTodoView(false));
-    showCalendar.addEventListener("click", () => showTodoView(true));
+    showList.addEventListener("click", () => showTodoView("list"));
+    showCalendar.addEventListener("click", () => showTodoView("calendar"));
+    showStatistics.addEventListener("click", () => showTodoView("statistics"));
+    statisticsPeriod.addEventListener("change", filterTodos);
     calendarPrev.addEventListener("click", () => moveCalendarMonth(-1));
     calendarNext.addEventListener("click", () => moveCalendarMonth(1));
     document.querySelector("#calendar-today").addEventListener("click", () => {
@@ -1199,7 +1403,7 @@
         backupMessage.textContent = "无法读取待办事项，已停止导出，以免生成空备份。";
         return;
       }
-      const json = JSON.stringify({ version: 3, todos, sort: todoSort.value }, null, 2);
+      const json = JSON.stringify({ version: 4, todos, sort: todoSort.value }, null, 2);
       const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
       const download = document.createElement("a");
       download.href = url;
@@ -1232,13 +1436,13 @@
         return;
       }
 
-      if (![1, 2, 3].includes(backup?.version) ||
+      if (![1, 2, 3, 4].includes(backup?.version) ||
           ((backup.version !== 1 || Object.hasOwn(backup, "sort")) &&
             !sortOptions.includes(backup.sort)) ||
           !Array.isArray(backup.todos) ||
           !backup.todos.every((todo) =>
             todo && typeof todo.text === "string" && todo.text.trim() &&
-            typeof todo.done === "boolean" && isBackupDate(todo.date) &&
+            typeof todo.done === "boolean" && validCompletion(todo) && isBackupDate(todo.date) &&
             priorityOrder.includes(todo.priority) &&
             (!Object.hasOwn(todo, "note") || typeof todo.note === "string") &&
             (!Object.hasOwn(todo, "category") ||
@@ -1297,7 +1501,7 @@
       const today = localDate();
       if (today !== lastStatsDate) {
         updateStats(today);
-        if (!calendar.hidden) filterTodos();
+        if (!calendar.hidden || !statistics.hidden) filterTodos();
       }
     }, 1000);
   </script>
