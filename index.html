@@ -98,7 +98,8 @@
       width: 100%;
     }
     .todo-options label { flex: none; display: inline-block; }
-    .todo-options input, .todo-options select, #todo-sort, #todo-category, #todo-category-filter {
+    .todo-options input, .todo-options select, #todo-sort, #todo-category,
+    #todo-category-filter, #todo-status-filter {
       padding: 4px;
       border: 1px solid #839f96;
       border-radius: 6px;
@@ -255,6 +256,12 @@
           <option value="life">生活</option>
           <option value="uncategorized">未分类</option>
         </select>
+        <label for="todo-status-filter">完成状态</label>
+        <select id="todo-status-filter">
+          <option value="all" selected>全部</option>
+          <option value="pending">未完成</option>
+          <option value="done">已完成</option>
+        </select>
         <label for="todo-search">搜索待办事项</label>
         <input id="todo-search" type="search" placeholder="输入标题或备注关键词">
       </div>
@@ -297,6 +304,7 @@
     const todoSearch = document.querySelector("#todo-search");
     const todoCategory = document.querySelector("#todo-category");
     const categoryFilter = document.querySelector("#todo-category-filter");
+    const statusFilter = document.querySelector("#todo-status-filter");
     const todoSearchResult = document.querySelector("#todo-search-result");
     const noteDrafts = new WeakMap();
     const todoStatus = document.querySelector("#todo-status");
@@ -468,15 +476,18 @@
     function filterTodos() {
       const keyword = todoSearch.value.trim().toLowerCase();
       const category = categoryFilter.value;
+      const status = statusFilter.value;
       let hasMatch = false;
       for (const item of todoList.children) {
         const matchesText = item.dataset.title.toLowerCase().includes(keyword) ||
           item.dataset.note.toLowerCase().includes(keyword);
         const matchesCategory = category === "all" || item.dataset.category === category;
-        item.hidden = !matchesText || !matchesCategory;
+        const done = item.querySelector('input[type="checkbox"]').checked;
+        const matchesStatus = status === "all" || done === (status === "done");
+        item.hidden = !matchesText || !matchesCategory || !matchesStatus;
         if (!item.hidden) hasMatch = true;
       }
-      todoSearchResult.hidden = hasMatch || (!keyword && category === "all");
+      todoSearchResult.hidden = hasMatch || (!keyword && category === "all" && status === "all");
     }
 
     function renderTodos() {
@@ -573,6 +584,8 @@
         await saveTodo(todo, { done: checkbox.checked });
         checkbox.checked = todo.done;
         updateStats();
+        filterTodos();
+        if (item.hidden) statusFilter.focus();
       });
       deleteButton.addEventListener("click", async () => {
         if (!await saveTodos(
@@ -652,6 +665,7 @@
     });
     todoSearch.addEventListener("input", filterTodos);
     categoryFilter.addEventListener("change", filterTodos);
+    statusFilter.addEventListener("change", filterTodos);
 
     const backupFile = document.querySelector("#backup-file");
     const backupMessage = document.querySelector("#backup-message");
