@@ -103,8 +103,8 @@
       gap: 8px;
       width: 100%;
     }
-    #todo-sort, #todo-category,
-    #todo-category-filter, #todo-status-filter {
+    #todo-sort, #todo-category, #todo-date, #todo-cycle,
+    #todo-category-filter, #todo-status-filter, #todo-cycle-filter {
       padding: 4px;
       border: 1px solid #839f96;
       border-radius: 6px;
@@ -113,6 +113,7 @@
       font: inherit;
     }
     .todo-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .todo-cycle { border-radius: 6px; padding: 2px 8px; background: #edf5f2; }
     .todo-overdue { color: #a32121; font-weight: 700; }
     .todo-stats {
       margin: 0 0 16px;
@@ -220,6 +221,8 @@
           <option value="study">学习</option>
           <option value="life">生活</option>
         </select>
+        <label>截止日期 <input id="todo-date" type="date"></label>
+        <label>重复周期 <select id="todo-cycle"></select></label>
         <button type="submit">添加</button>
       </form>
       <label for="todo-sort">排序方式</label>
@@ -249,6 +252,7 @@
             <legend>任务详情</legend>
             <label>标题 <input name="text" type="text" required autofocus></label>
             <label>截止日期 <input name="date" type="date"></label>
+            <label>重复周期 <select name="cycle"></select></label>
             <label>优先级 <select name="priority"></select></label>
             <label>备注 <textarea name="note" rows="4"></textarea></label>
             <label>分类 <select name="category"></select></label>
@@ -274,6 +278,10 @@
           <option value="all" selected>全部</option>
           <option value="pending">未完成</option>
           <option value="done">已完成</option>
+        </select>
+        <label for="todo-cycle-filter">重复周期</label>
+        <select id="todo-cycle-filter">
+          <option value="all">全部任务</option>
         </select>
         <label for="todo-search">搜索待办事项</label>
         <input id="todo-search" type="search" placeholder="输入标题或备注关键词">
@@ -316,6 +324,9 @@
     const todoList = document.querySelector("#todo-list");
     const todoSearch = document.querySelector("#todo-search");
     const todoCategory = document.querySelector("#todo-category");
+    const todoDate = document.querySelector("#todo-date");
+    const todoCycle = document.querySelector("#todo-cycle");
+    const cycleFilter = document.querySelector("#todo-cycle-filter");
     const categoryFilter = document.querySelector("#todo-category-filter");
     const statusFilter = document.querySelector("#todo-status-filter");
     const todoSearchResult = document.querySelector("#todo-search-result");
@@ -329,6 +340,7 @@
     const priorities = { high: "高", medium: "中", low: "低" };
     const priorityOrder = ["high", "medium", "low"];
     const categories = { work: "工作", study: "学习", life: "生活", uncategorized: "未分类" };
+    const cycles = { none: "不重复", daily: "每天", weekly: "每周", monthly: "每月" };
     let todos = [];
     let savedSnapshot;
 
@@ -343,7 +355,7 @@
         (!Object.hasOwn(todo, "note") || typeof todo.note === "string") &&
         (!Object.hasOwn(todo, "category") ||
           (typeof todo.category === "string" && Object.hasOwn(categories, todo.category)))
-      )) throw new Error("Invalid todo data");
+      ) || !validRecurrenceData(savedTodos)) throw new Error("Invalid todo data");
       todos = savedTodos.map((todo) => ({
           ...todo,
           date: todo.date ?? "",
@@ -430,7 +442,8 @@
     const editStatus = document.querySelector("#todo-edit-status");
     const editSave = document.querySelector("#todo-edit-save");
     const editCancel = document.querySelector("#todo-edit-cancel");
-    const { text: editTitle, date: editDate, priority: editPriority, note: editNote, category: editCategory } =
+    const { text: editTitle, date: editDate, cycle: editCycle, priority: editPriority,
+      note: editNote, category: editCategory } =
       editForm.elements;
     let editingTodo = null;
     let initialEditValues = null;
@@ -442,11 +455,20 @@
     for (const [category, name] of Object.entries(categories)) {
       editCategory.add(new Option(name, category));
     }
+    for (const select of [todoCycle, editCycle, cycleFilter]) {
+      for (const [value, name] of Object.entries(cycles)) {
+        select.add(new Option(name, value));
+      }
+    }
+    configureScheduleInputs(todoDate, todoCycle);
+    configureScheduleInputs(editDate, editCycle);
 
     function openTodoEditor(todo) {
       editingTodo = todo;
       editTitle.value = todo.text;
       editDate.value = todo.date;
+      editCycle.value = taskCycle(todo);
+      editDate.required = editCycle.value !== "none";
       editPriority.value = todo.priority;
       editNote.value = todo.note;
       editCategory.value = todo.category;
@@ -467,6 +489,7 @@
       if (button?.isConnected && !button.closest(".todo-item").hidden) button.focus();
       else if (categoryFilter.value !== "all") categoryFilter.focus();
       else if (statusFilter.value !== "all") statusFilter.focus();
+      else if (cycleFilter.value !== "all") cycleFilter.focus();
       else todoSearch.focus();
     }
 
@@ -476,7 +499,6 @@
       closeTodoEditor();
     });
     editTitle.addEventListener("input", () => editTitle.setCustomValidity(""));
-    editDate.addEventListener("input", () => editDate.setCustomValidity(""));
     editForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!editDialog.open || editSaving || !editingTodo) return;
@@ -487,12 +509,6 @@
         editTitle.reportValidity();
         return;
       }
-      if (!isBackupDate(editDate.value)) {
-        editDate.setCustomValidity("请输入有效的截止日期。");
-        editDate.reportValidity();
-        return;
-      }
-
       const todo = editingTodo;
       const changes = Object.fromEntries(
         [...new FormData(editForm)].filter(([field, value]) => {
@@ -506,7 +522,18 @@
         closeTodoEditor();
         return;
       }
+      const date = changes.date ?? todo.date;
+      const cycle = changes.cycle ?? taskCycle(todo);
+      if (!validateSchedule(editDate, date, cycle)) return;
       if (Object.hasOwn(changes, "text")) changes.text = text;
+      if (Object.hasOwn(changes, "cycle") || (cycle === "monthly" && Object.hasOwn(changes, "date"))) {
+        changes.taskId = todo.taskId ?? newTaskId();
+        changes.recurrence = {
+          cycle,
+          anchor: cycle === "monthly" ? Number(date.split("-")[2]) : null
+        };
+        delete changes.cycle;
+      }
       editSaving = true;
       editFields.disabled = editSave.disabled = editCancel.disabled = true;
       editStatus.textContent = "正在保存…";
@@ -542,6 +569,126 @@
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0")
       ].join("-");
+    }
+
+    function taskCycle(todo) {
+      return todo.recurrence?.cycle ?? "none";
+    }
+
+    function newTaskId() {
+      return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+        byte.toString(16).padStart(2, "0")
+      ).join("");
+    }
+
+    function validRecurrenceData(tasks) {
+      const ids = new Set();
+      return tasks.every((todo) => {
+        if (Object.hasOwn(todo, "taskId")) {
+          if (typeof todo.taskId !== "string" || !/^[0-9a-f]{32}$/.test(todo.taskId) ||
+              ids.has(todo.taskId)) return false;
+          ids.add(todo.taskId);
+        }
+        if (Object.hasOwn(todo, "successorGenerated") &&
+            (typeof todo.successorGenerated !== "boolean" || !todo.taskId)) return false;
+        if (!Object.hasOwn(todo, "recurrence")) return true;
+
+        const rule = todo.recurrence;
+        if (!todo.taskId || !rule || typeof rule.cycle !== "string" || !Object.hasOwn(cycles, rule.cycle) ||
+            (rule.cycle !== "none" && (!todo.date || !isBackupDate(todo.date)))) return false;
+        return rule.cycle === "monthly"
+          ? Number.isInteger(rule.anchor) && rule.anchor >= 1 && rule.anchor <= 31
+          : rule.anchor === null;
+      });
+    }
+
+    function configureScheduleInputs(dateInput, cycleSelect) {
+      dateInput.addEventListener("input", () => dateInput.setCustomValidity(""));
+      cycleSelect.addEventListener("change", () => {
+        dateInput.required = cycleSelect.value !== "none";
+        dateInput.setCustomValidity("");
+      });
+    }
+
+    function validateSchedule(dateInput, date, cycle) {
+      if (isBackupDate(date) && (date || cycle === "none")) return true;
+      dateInput.setCustomValidity(date ? "请输入有效的截止日期。" : "重复任务必须填写截止日期。");
+      dateInput.reportValidity();
+      return false;
+    }
+
+    function daysInMonth(year, month) {
+      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+      return [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+    }
+
+    function weekday(date) {
+      // 公历每 400 年重复一轮，先缩小年份以保持整数运算精度。
+      const year = (date[0] - 1) % 400 + 1;
+      const previousYears = year - 1;
+      let days = previousYears * 365 + Math.floor(previousYears / 4) -
+        Math.floor(previousYears / 100) + Math.floor(previousYears / 400) + date[2];
+      for (let month = 1; month < date[1]; month++) days += daysInMonth(year, month);
+      return days % 7;
+    }
+
+    function nextDueDate(todo, completedOn) {
+      const reference = compareDates(todo.date, completedOn) >= 0 ? todo.date : completedOn;
+      let [year, month, day] = reference.split("-").map(Number);
+      const { cycle, anchor } = todo.recurrence;
+      if (cycle === "monthly") {
+        const thisMonth = Math.min(anchor, daysInMonth(year, month));
+        if (thisMonth <= day) {
+          if (++month > 12) {
+            month = 1;
+            year++;
+          }
+        }
+        day = Math.min(anchor, daysInMonth(year, month));
+      } else {
+        const offset = cycle === "weekly"
+          ? (weekday(todo.date.split("-").map(Number)) - weekday([year, month, day]) + 7) % 7 || 7
+          : 1;
+        day += offset;
+        const monthLength = daysInMonth(year, month);
+        if (day > monthLength) {
+          day -= monthLength;
+          if (++month > 12) {
+            month = 1;
+            year++;
+          }
+        }
+      }
+      if (!Number.isSafeInteger(year)) throw new RangeError("Next due date exceeds supported year");
+      return [String(year).padStart(4, "0"), String(month).padStart(2, "0"), String(day).padStart(2, "0")].join("-");
+    }
+
+    async function setTodoDone(todo, done) {
+      const completedOn = localDate();
+      let successor;
+      const saved = await saveTodos(() => {
+        if (!todos.includes(todo) || todo.done === done) return false;
+        const updated = { ...todo, done };
+        const next = todos.map((entry) => entry === todo ? updated : entry);
+        if (done && taskCycle(todo) !== "none" && !todo.successorGenerated) {
+          successor = {
+            taskId: newTaskId(),
+            text: todo.text, done: false, date: nextDueDate(todo, completedOn),
+            priority: todo.priority, note: todo.note, category: todo.category,
+            recurrence: { ...todo.recurrence }
+          };
+          updated.successorGenerated = true;
+          next.push(successor);
+        }
+        return next;
+      }, () => {
+        todo.done = done;
+        if (successor) {
+          todo.successorGenerated = true;
+          todos.push(successor);
+        }
+      });
+      return saved && Boolean(successor);
     }
 
     function isOverdue(done, date, today) {
@@ -602,6 +749,7 @@
       const keyword = todoSearch.value.trim().toLowerCase();
       const category = categoryFilter.value;
       const status = statusFilter.value;
+      const cycle = cycleFilter.value;
       let hasMatch = false;
       for (const item of todoList.children) {
         const matchesText = item.dataset.title.toLowerCase().includes(keyword) ||
@@ -609,10 +757,11 @@
         const matchesCategory = category === "all" || item.dataset.category === category;
         const done = item.querySelector('input[type="checkbox"]').checked;
         const matchesStatus = status === "all" || done === (status === "done");
-        item.hidden = !matchesText || !matchesCategory || !matchesStatus;
+        const matchesCycle = cycle === "all" || item.dataset.cycle === cycle;
+        item.hidden = !matchesText || !matchesCategory || !matchesStatus || !matchesCycle;
         if (!item.hidden) hasMatch = true;
       }
-      todoSearchResult.hidden = hasMatch || (!keyword && category === "all" && status === "all");
+      todoSearchResult.hidden = hasMatch || (!keyword && category === "all" && status === "all" && cycle === "all");
     }
 
     function renderTodos() {
@@ -638,6 +787,7 @@
       item.dataset.date = todo.date;
       item.dataset.note = todo.note;
       item.dataset.category = todo.category;
+      item.dataset.cycle = taskCycle(todo);
       const label = document.createElement("label");
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
@@ -673,13 +823,41 @@
       overdue.className = "todo-overdue";
       overdue.textContent = "已逾期";
       options.append(date, priority, category, overdue);
+      if (item.dataset.cycle !== "none") {
+        const cycle = document.createElement("span");
+        cycle.className = "todo-cycle";
+        cycle.textContent = cycles[item.dataset.cycle];
+        options.append(cycle);
+      }
 
       checkbox.addEventListener("change", async () => {
-        await saveTodo(todo, { done: checkbox.checked });
+        const done = checkbox.checked;
         checkbox.checked = todo.done;
+        const restoreFocus = document.activeElement === checkbox;
+        checkbox.disabled = true;
+        const generated = await setTodoDone(todo, done);
+        checkbox.disabled = false;
+        if (generated) {
+          const focusLost = document.activeElement === document.body || document.activeElement === checkbox;
+          renderTodos();
+          const updatedItem = editButtons.get(todo)?.closest(".todo-item");
+          if (restoreFocus && focusLost && !editDialog.open) {
+            if (updatedItem && !updatedItem.hidden) updatedItem.querySelector('input[type="checkbox"]').focus();
+            else statusFilter.focus();
+          }
+          return;
+        }
+        checkbox.checked = todo.done;
+        const currentItem = editButtons.get(todo)?.closest(".todo-item");
+        const currentCheckbox = currentItem?.querySelector('input[type="checkbox"]');
+        if (currentCheckbox?.isConnected) currentCheckbox.checked = todo.done;
         updateStats();
         filterTodos();
-        if (item.hidden) statusFilter.focus();
+        if (restoreFocus && (document.activeElement === document.body || document.activeElement === checkbox) &&
+            currentCheckbox?.isConnected && !editDialog.open) {
+          if (currentItem.hidden) statusFilter.focus();
+          else currentCheckbox.focus();
+        }
       });
       deleteButton.addEventListener("click", async () => {
         if (!await saveTodos(
@@ -711,11 +889,24 @@
       }
 
       const todo = {
-        text, done: false, date: "", priority: "medium", note: "", category: todoCategory.value
+        taskId: newTaskId(),
+        text, done: false, date: todoDate.value, priority: "medium", note: "", category: todoCategory.value
       };
+      const cycle = todoCycle.value;
+      if (!validateSchedule(todoDate, todo.date, cycle)) return;
+      if (cycle !== "none") {
+        todo.recurrence = {
+          cycle, anchor: cycle === "monthly" ? Number(todo.date.split("-")[2]) : null
+        };
+      }
       if (!await saveTodos(() => [...todos, todo], (next) => { todos = next; })) return;
       renderTodos();
-      if (todoInput.value.trim() === text && todoCategory.value === todo.category) todoForm.reset();
+      if (todoInput.value.trim() === text && todoCategory.value === todo.category &&
+          todoDate.value === todo.date && todoCycle.value === cycle) {
+        todoForm.reset();
+        todoCycle.value = "none";
+        todoDate.required = todoCycle.value !== "none";
+      }
       todoInput.focus();
     });
 
@@ -733,6 +924,7 @@
     todoSearch.addEventListener("input", filterTodos);
     categoryFilter.addEventListener("change", filterTodos);
     statusFilter.addEventListener("change", filterTodos);
+    cycleFilter.addEventListener("change", filterTodos);
 
     const backupFile = document.querySelector("#backup-file");
     const backupMessage = document.querySelector("#backup-message");
@@ -744,10 +936,8 @@
       if (value === "") return true;
       if (typeof value !== "string" || !/^\d{4,}-\d{2}-\d{2}$/.test(value)) return false;
       const [year, month, day] = value.split("-").map(Number);
-      const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-      const daysPerMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
       return Number.isSafeInteger(year) && year > 0 && month >= 1 && month <= 12 &&
-        day >= 1 && day <= daysPerMonth[month - 1];
+        day >= 1 && day <= daysInMonth(year, month);
     }
 
     document.querySelector("#backup-export").addEventListener("click", () => {
@@ -755,7 +945,7 @@
         backupMessage.textContent = "无法读取待办事项，已停止导出，以免生成空备份。";
         return;
       }
-      const json = JSON.stringify({ version: 2, todos, sort: todoSort.value }, null, 2);
+      const json = JSON.stringify({ version: 3, todos, sort: todoSort.value }, null, 2);
       const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
       const download = document.createElement("a");
       download.href = url;
@@ -788,8 +978,8 @@
         return;
       }
 
-      if ((backup?.version !== 1 && backup?.version !== 2) ||
-          ((backup.version === 2 || Object.hasOwn(backup, "sort")) &&
+      if (![1, 2, 3].includes(backup?.version) ||
+          ((backup.version !== 1 || Object.hasOwn(backup, "sort")) &&
             !sortOptions.includes(backup.sort)) ||
           !Array.isArray(backup.todos) ||
           !backup.todos.every((todo) =>
@@ -799,7 +989,7 @@
             (!Object.hasOwn(todo, "note") || typeof todo.note === "string") &&
             (!Object.hasOwn(todo, "category") ||
               (typeof todo.category === "string" && Object.hasOwn(categories, todo.category)))
-          )) {
+          ) || !validRecurrenceData(backup.todos)) {
         backupMessage.textContent = "备份格式不正确，请选择本页面导出的 JSON 文件。";
         return;
       }
